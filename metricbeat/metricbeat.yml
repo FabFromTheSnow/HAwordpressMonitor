@@ -1,0 +1,41 @@
+metricbeat.config.modules:
+  path: ${path.config}/modules.d/*.yml
+  reload.enabled: false
+
+output.elasticsearch:
+  hosts: ["${ELASTICSEARCH_HOSTS}"]
+  username: "${ELASTICSEARCH_USERNAME}"
+  password: "${ELASTICSEARCH_PASSWORD}"
+  ssl:
+    certificate_authorities: ["/usr/share/metricbeat/certs/ca/ca.crt"]
+    verification_mode: full
+  bulk_max_size: 100
+  worker: 2
+
+setup.kibana:
+  host: "https://kibana:5601"
+  ssl.certificate_authorities: ["/usr/share/metricbeat/certs/ca/ca.crt"]
+  username: "kibana_system"
+  password: "${ELASTICSEARCH_PASSWORD}"
+
+metricbeat.modules:
+  - module: docker
+    metricsets:
+      - container
+      - cpu
+      - memory
+      - network
+      - diskio
+      - info
+    hosts: ["unix:///var/run/docker.sock"]
+    period: 60s
+    enabled: true
+    processors:
+      - add_host_metadata: ~
+      - add_docker_metadata: ~
+
+
+queue.mem:
+  events: 8192
+  flush.min_events: 512
+  flush.timeout: 5s

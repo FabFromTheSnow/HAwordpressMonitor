@@ -1,0 +1,45 @@
+filebeat.modules:
+  - module: nginx
+    access:
+      enabled: true
+      var.paths: ["/var/log/nginx/access.log"]
+    error:
+      enabled: true
+      var.paths: ["/var/log/nginx/error.log"]
+
+  - module: haproxy
+    log:
+      enabled: true
+      var.paths: ["/var/log/haproxy/*.log"]
+
+filebeat.registry.flush: 1s
+max_procs: 1
+
+setup.kibana:
+  host: "https://kibana:5601"
+  ssl.certificate_authorities: ["/usr/share/filebeat/certs/ca/ca.crt"]
+  username: "kibana_system"
+  password: "${elkpsw}"
+
+output.elasticsearch:
+  hosts: ["https://elastic:9200"]
+  username: "elastic"
+  password: "${elkpsw}"
+  ssl.certificate_authorities: ["/usr/share/filebeat/certs/ca/ca.crt"]
+  bulk_max_size: 50
+  worker: 1
+  indices:
+    - index: "web-logs-%{+yyyy.MM.dd}"
+
+setup.template.enabled: true
+setup.template.name: "web-logs"
+setup.template.pattern: "web-logs-*"
+setup.ilm.enabled: false
+
+logging.level: info
+logging.to_files: true
+logging.files:
+  path: /var/log
+  name: filebeat
+  keepfiles: 7
+  permissions: 0644
