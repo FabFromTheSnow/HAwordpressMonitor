@@ -1,4 +1,4 @@
-I'll update the README with the current date, time, and user login information and provide the complete process to push it to your repository.
+#This doc was written with copilot and is not meant to be exhaustive
 
 ```markdown name=README.md
 # Rev2Load2xApache
