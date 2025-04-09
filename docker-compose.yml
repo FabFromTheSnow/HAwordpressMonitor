@@ -190,8 +190,12 @@ services:
       - ELASTICSEARCH_HOSTS=https://elastic:9200
       - ELASTICSEARCH_USERNAME=kibana_system
       - ELASTICSEARCH_PASSWORD=${elasticpassword}
-      - SERVER_SSL_ENABLED=false
       - ELASTICSEARCH_SSL_CERTIFICATEAUTHORITIES=/usr/share/kibana/config/certs/ca/ca.crt
+      - SERVER_SSL_ENABLED=true
+      - SERVER_SSL_CERTIFICATE=/usr/share/kibana/config/certs/kibana/kibana.crt
+      - SERVER_SSL_KEY=/usr/share/kibana/config/certs/kibana/kibana.key
+      - SERVER_SSL_CERTIFICATEAUTHORITIES=/usr/share/kibana/config/certs/ca/ca.crt
+
     volumes:
       - kibanadata:/usr/share/kibana/data
       - certs:/usr/share/kibana/config/certs
@@ -239,7 +243,6 @@ services:
       - ELASTICSEARCH_USERNAME=elastic
       - ELASTICSEARCH_PASSWORD=${elasticpassword}
       - elkpsw=${elasticpassword}
-      - SERVER_SSL_ENABLED=false
       - ELASTICSEARCH_SSL_CERTIFICATEAUTHORITIES=/usr/share/metricbeat/certs/ca/ca.crt
     command: ["metricbeat", "-e", "--strict.perms=false"]
     networks:
