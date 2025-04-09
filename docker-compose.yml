@@ -26,34 +26,227 @@ services:
       back:
         ipv4_address: 10.0.2.11
     volumes:
-      - ./log/haproxy:/var/log/haproxy
+      - ./log/haproxy:/tmp/haproxy
       - ./haproxy/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg
     command: >
-      bash -c "haproxy -f '/usr/local/etc/haproxy/haproxy.cfg' -db"
+      bash -c "haproxy -f /usr/local/etc/haproxy/haproxy.cfg -db 2>&1 | tee /tmp/haproxy/haproxy.log"
     depends_on:
       - nginx
+      - wordpress1
+      - wordpress2
 
-  apache1:
-    image: httpd:latest
-    container_name: apache1
-    command: >
-      bash -c "apt update && apt install -y curl && httpd-foreground"
+  db:
+    # We use a mariadb image which supports both amd64 & arm64 architecture
+    image: mariadb:10.6.4-focal
+    container_name: db
+    # If you really want to use MySQL, uncomment the following line
+    #image: mysql:8.0.27
+    command: '--default-authentication-plugin=mysql_native_password'
+    volumes:
+      - db_data:/var/lib/mysql
+    restart: always
+    environment:
+      - MYSQL_ROOT_PASSWORD=${WORDpass}
+      - MYSQL_DATABASE=wordpress
+      - MYSQL_USER=wordpress
+      - MYSQL_PASSWORD=${WORDpass}
+    expose:
+      - 3306
+      - 33060
     networks:
+      bdd:
+        ipv4_address: 10.0.3.10
+
+  wordpress1:
+    container_name: wordpress1
+    image: wordpress:latest
+    volumes:
+      - wp_data:/var/www/html
+    restart: always
+    environment:
+      - WORDPRESS_DB_HOST=db
+      - WORDPRESS_DB_USER=wordpress
+      - WORDPRESS_DB_PASSWORD=${WORDpass}
+      - WORDPRESS_DB_NAME=wordpress
+    networks:
+      bdd:
+        ipv4_address: 10.0.3.11
       back:
         ipv4_address: 10.0.2.12
-    volumes:
-      - ./apache/index.html:/usr/local/apache2/htdocs/index.html
+    depends_on:
+      - db
 
-  apache2:
-    image: httpd:latest
-    container_name: apache2
-    command: >
-      bash -c "apt update && apt install -y curl && httpd-foreground"
+  wordpress2:
+    image: wordpress:latest
+    container_name: wordpress2
+    volumes:
+      - wp_data:/var/www/html
+    restart: always
+    environment:
+      - WORDPRESS_DB_HOST=db
+      - WORDPRESS_DB_USER=wordpress
+      - WORDPRESS_DB_PASSWORD=${WORDpass}
+      - WORDPRESS_DB_NAME=wordpress
     networks:
+      bdd:
+        ipv4_address: 10.0.3.12
       back:
         ipv4_address: 10.0.2.13
+    depends_on:
+      - db
+
+
+  setup:
+    image: docker.elastic.co/elasticsearch/elasticsearch:${STACK_VERSION}
+    container_name: setup
     volumes:
-      - ./apache/index.html:/usr/local/apache2/htdocs/index.html
+      - certs:/usr/share/elasticsearch/config/certs
+    user: "0"
+    command: >
+      bash -c '
+        if [ x${elasticpassword} == x ]; then
+          echo "Set the elasticpassword environment variable in the .env file";
+          exit 1;
+        elif [ x${elasticpassword} == x ]; then
+          echo "Set the elasticpassword environment variable in the .env file";
+          exit 1;
+        fi;
+        if [ ! -f config/certs/ca.zip ]; then
+          echo "Creating CA";
+          bin/elasticsearch-certutil ca --silent --pem -out config/certs/ca.zip;
+          unzip config/certs/ca.zip -d config/certs;
+        fi;
+        if [ ! -f config/certs/certs.zip ]; then
+          echo "Creating certs";
+          echo -ne \
+          "instances:\n"\
+          "  - name: elastic\n"\
+          "    dns:\n"\
+          "      - elastic\n"\
+          "      - localhost\n"\
+          "    ip:\n"\
+          "      - 127.0.0.1\n"\
+          "      - 10.0.2.14\n"\
+          "  - name: kibana\n"\
+          "    dns:\n"\
+          "      - kibana\n"\
+          "      - localhost\n"\
+          "    ip:\n"\
+          "      - 127.0.0.1\n"\
+          "      - 10.0.1.12\n"\
+          > config/certs/instances.yml;
+          bin/elasticsearch-certutil cert --silent --pem -out config/certs/certs.zip --in config/certs/instances.yml --ca-cert config/certs/ca/ca.crt --ca-key config/certs/ca/ca.key;
+          unzip config/certs/certs.zip -d config/certs;
+        fi;
+        echo "Setting file permissions";
+        chown -R root:root config/certs;
+        find . -type d -exec chmod 750 {} \;;
+        find . -type f -exec chmod 640 {} \;;
+        echo "Waiting for Elasticsearch availability";
+        until curl -s --cacert config/certs/ca/ca.crt https://elastic:9200 | grep -q "missing authentication credentials"; do sleep 30; done;
+        echo "Setting kibana_system password";
+        until curl -s -X POST --cacert config/certs/ca/ca.crt -u "elastic:${elasticpassword}" -H "Content-Type: application/json" https://elastic:9200/_security/user/kibana_system/_password -d "{\"password\":\"${elasticpassword}\"}" | grep -q "^{}"; do sleep 10; done;
+        echo "All done!";
+      '
+    healthcheck:
+      test: ["CMD-SHELL", "[ -f config/certs/elastic/elastic.crt ]"]
+      interval: 1s
+      timeout: 5s
+      retries: 120
+    networks:
+      back:
+
+  elastic:
+    image: elasticsearch:${STACK_VERSION}
+    container_name: elastic
+    environment:
+      - discovery.type=single-node
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+      - ELASTIC_PASSWORD=${elasticpassword}
+      - ELASTICSEARCH_USERNAME=elastic
+      - xpack.security.enabled=true
+      - xpack.security.http.ssl.enabled=true
+      - xpack.security.http.ssl.key=/usr/share/elasticsearch/config/certs/elastic/elastic.key
+      - xpack.security.http.ssl.certificate=/usr/share/elasticsearch/config/certs/elastic/elastic.crt
+      - xpack.security.http.ssl.certificate_authorities=/usr/share/elasticsearch/config/certs/ca/ca.crt
+      - action.auto_create_index=web-logs-*
+    volumes:
+      - esdata01:/usr/share/elasticsearch/data
+      - certs:/usr/share/elasticsearch/config/certs
+    networks:
+      front:
+        ipv4_address: 10.0.1.12
+      back:
+        ipv4_address: 10.0.2.14
+    depends_on:
+      - setup
+
+  kibana:
+    image: kibana:${STACK_VERSION}
+    container_name: kibana
+    ports:
+      - 5601:5601
+    environment:
+      - ELASTICSEARCH_HOSTS=https://elastic:9200
+      - ELASTICSEARCH_USERNAME=kibana_system
+      - ELASTICSEARCH_PASSWORD=${elasticpassword}
+      - SERVER_SSL_ENABLED=false
+      - ELASTICSEARCH_SSL_CERTIFICATEAUTHORITIES=/usr/share/kibana/config/certs/ca/ca.crt
+    volumes:
+      - kibanadata:/usr/share/kibana/data
+      - certs:/usr/share/kibana/config/certs
+    depends_on:
+      - elastic
+    networks:
+      front:
+        ipv4_address: 10.0.1.13
+
+  filebeat:
+    image: elastic/filebeat:${STACK_VERSION}
+    container_name: filebeat
+    user: "root"
+    command: ["filebeat", "-e", "--strict.perms=false"]
+    environment:
+      - elkpsw=${elasticpassword}
+    volumes:
+      - ./filebeat/filebeat.yml:/usr/share/filebeat/filebeat.yml:ro
+      - ./log/nginx:/var/log/nginx:ro
+      - ./log/haproxy:/var/log/haproxy:ro
+      - certs:/usr/share/filebeat/certs:ro
+    depends_on:
+      - elastic
+      - kibana
+      - nginx
+      - wordpress1
+    networks:
+      front:
+        ipv4_address: 10.0.1.14
+
+  metricbeat:
+    image: elastic/metricbeat:${STACK_VERSION}
+    container_name: metricbeat
+    user: root
+    volumes:
+      - ./metricbeat/metricbeat.yml:/usr/share/metricbeat/metricbeat.yml:ro
+      - certs:/usr/share/metricbeat/certs:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    depends_on:
+      - elastic
+      - kibana
+      - filebeat
+    environment:
+      - ELASTICSEARCH_HOSTS=https://elastic:9200
+      - ELASTICSEARCH_USERNAME=elastic
+      - ELASTICSEARCH_PASSWORD=${elasticpassword}
+      - elkpsw=${elasticpassword}
+      - SERVER_SSL_ENABLED=false
+      - ELASTICSEARCH_SSL_CERTIFICATEAUTHORITIES=/usr/share/metricbeat/certs/ca/ca.crt
+    command: ["metricbeat", "-e", "--strict.perms=false"]
+    networks:
+      front:
+        ipv4_address: 10.0.1.15
+
+
 
 
 networks:
@@ -69,3 +262,17 @@ networks:
     ipam:
       config:
         - subnet: 10.0.2.0/24
+  bdd:
+    ipam:
+      config:
+        - subnet: 10.0.3.0/24 
+
+volumes:
+  certs:
+  esdata01:
+  kibanadata:
+  metricbeatdata01:
+  filebeatdata01:
+  logstashdata01:
+  db_data:
+  wp_data:
