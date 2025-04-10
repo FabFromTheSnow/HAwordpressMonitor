@@ -10,7 +10,7 @@ filebeat.modules:
   - module: haproxy
     log:
       enabled: true
-      var.paths: ["/var/log/haproxy/*.log"]
+      var.paths: ["/var/log/haproxy/haproxy.log"]
 
 filebeat.registry.flush: 1s
 max_procs: 1

@@ -154,7 +154,7 @@ services:
       timeout: 5s
       retries: 120
     networks:
-      back:
+      elk:
 
   elastic:
     image: elasticsearch:${STACK_VERSION}
@@ -174,10 +174,8 @@ services:
       - esdata01:/usr/share/elasticsearch/data
       - certs:/usr/share/elasticsearch/config/certs
     networks:
-      front:
-        ipv4_address: 10.0.1.12
-      back:
-        ipv4_address: 10.0.2.14
+      elk:
+        ipv4_address: 10.0.4.11
     depends_on:
       - setup
 
@@ -202,8 +200,8 @@ services:
     depends_on:
       - elastic
     networks:
-      front:
-        ipv4_address: 10.0.1.13
+      elk:
+        ipv4_address: 10.0.4.10
 
   filebeat:
     image: elastic/filebeat:${STACK_VERSION}
@@ -223,8 +221,8 @@ services:
       - nginx
       - wordpress1
     networks:
-      front:
-        ipv4_address: 10.0.1.14
+      elk:
+        ipv4_address: 10.0.4.12
 
   metricbeat:
     image: elastic/metricbeat:${STACK_VERSION}
@@ -246,8 +244,8 @@ services:
       - ELASTICSEARCH_SSL_CERTIFICATEAUTHORITIES=/usr/share/metricbeat/certs/ca/ca.crt
     command: ["metricbeat", "-e", "--strict.perms=false"]
     networks:
-      front:
-        ipv4_address: 10.0.1.15
+      elk:
+        ipv4_address: 10.0.4.13
 
 
 
@@ -268,7 +266,11 @@ networks:
   bdd:
     ipam:
       config:
-        - subnet: 10.0.3.0/24 
+        - subnet: 10.0.3.0/24
+  elk:
+    ipam:
+      config:
+        - subnet: 10.0.4.0/24 
 
 volumes:
   certs:
